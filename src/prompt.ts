@@ -106,14 +106,83 @@ function openEditor(initial: string): string {
   return text
 }
 
+export function splitEditorCommand(editor: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quote: 'single' | 'double' | null = null
+  let escaped = false
+
+  for (const char of editor) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+
+    if (quote === 'single') {
+      if (char === "'") quote = null
+      else current += char
+      continue
+    }
+
+    if (quote === 'double') {
+      if (char === '"') quote = null
+      else if (char === '\\') escaped = true
+      else current += char
+      continue
+    }
+
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+
+    if (char === "'") {
+      quote = 'single'
+      continue
+    }
+
+    if (char === '"') {
+      quote = 'double'
+      continue
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        parts.push(current)
+        current = ''
+      }
+      continue
+    }
+
+    current += char
+  }
+
+  if (escaped) current += '\\'
+  if (current) parts.push(current)
+  return parts
+}
+
+export function buildEditorInvocation(editor: string, file: string) {
+  const [command = editor, ...args] = splitEditorCommand(editor)
+  const name = basename(command).toLowerCase()
+  const needsWait = (name === 'webstorm' || name === 'webstorm1') && !args.includes('--wait')
+
+  return {
+    command,
+    name,
+    args: [...args, ...(needsWait ? ['--wait'] : []), file],
+  }
+}
+
 function runEditor(editor: string, file: string) {
-  const direct = spawnSync(editor, [file], { stdio: 'inherit' })
+  const invocation = buildEditorInvocation(editor, file)
+  const direct = spawnSync(invocation.command, invocation.args, { stdio: 'inherit' })
   const error = direct.error as NodeJS.ErrnoException | undefined
   if (!error || error.code !== 'ENOENT') return direct
 
-  const name = basename(editor).toLowerCase()
-  if (name === 'webstorm' || name === 'webstorm1') {
-    const app = spawnSync('open', ['-W', '-a', 'WebStorm', file], { stdio: 'inherit' })
+  if (invocation.name === 'webstorm' || invocation.name === 'webstorm1') {
+    const app = spawnSync('open', ['-W', '-a', 'WebStorm', '--args', ...invocation.args], { stdio: 'inherit' })
     if (app.status === 0 && !app.error) return app
   }
 

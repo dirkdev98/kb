@@ -12,6 +12,8 @@ const rootDir = process.env.KB_TEST_ROOT ?? mkdtempSync(join(tmpdir(), 'kb-test-
 runCli(process.argv.slice(2), {
   paths: makePaths(rootDir),
   now: () => new Date(),
+}).then((exitCode) => {
+  process.exit(exitCode)
 }).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   console.error(message)

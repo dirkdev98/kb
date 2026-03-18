@@ -9,7 +9,9 @@
   "scripts": {
     "check": "tsc -p tsconfig.json",
     "dev": "node --experimental-strip-types src/cli.ts",
-    "dev:test": "node --experimental-strip-types src/test-cli.ts"
+    "dev:test": "node --experimental-strip-types src/test-cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@orama/orama": "^3.1.18",
@@ -17,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }

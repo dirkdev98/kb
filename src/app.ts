@@ -1,6 +1,5 @@
 import { mkdirSync } from 'node:fs'
 import { styleText } from 'node:util'
-import process from 'node:process'
 import { KBDatabase } from './db.ts'
 import { KBSearch } from './search.ts'
 import { editEntryInEditor, promptNewEntry } from './prompt.ts'
@@ -14,6 +13,17 @@ export type AppDeps = {
   paths: StoragePaths
   now: () => Date
   out?: Pick<typeof console, 'log' | 'error'>
+  promptNewEntry?: typeof promptNewEntry
+  editEntryInEditor?: typeof editEntryInEditor
+}
+
+export class CliExit extends Error {
+  readonly exitCode: number
+
+  constructor(exitCode: number) {
+    super(`CLI exited with code ${exitCode}`)
+    this.exitCode = exitCode
+  }
 }
 
 const paint = {
@@ -29,7 +39,7 @@ const paint = {
   arg: (value: string): string => styleText('dim', value),
 }
 
-function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1): never {
+export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1): never {
   const write = exitCode === 0 ? out.log : out.error
   write(paint.label('Usage'))
   write(`  ${paint.cmd('kb')}                         add a new entry`)
@@ -44,10 +54,10 @@ function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1): never 
   write(`  ${paint.cmd('kb list')} ${paint.arg('--tag=sqlite')}`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#12')}`)
   write(`  ${paint.cmd('kb search')} ${paint.arg('"fts tokenizer"')}`)
-  process.exit(exitCode)
+  throw new CliExit(exitCode)
 }
 
-function parseId(raw: string | undefined, out: Pick<typeof console, 'log' | 'error'>): number {
+export function parseId(raw: string | undefined, out: Pick<typeof console, 'log' | 'error'>): number {
   if (!raw) usage(out)
   const cleaned = raw.replace(/^#/, '')
   const id = Number(cleaned)
@@ -55,7 +65,7 @@ function parseId(raw: string | undefined, out: Pick<typeof console, 'log' | 'err
   return id
 }
 
-function parseCommand(argv: string[], out: Pick<typeof console, 'log' | 'error'>): ParsedCommand {
+export function parseCommand(argv: string[], out: Pick<typeof console, 'log' | 'error'>): ParsedCommand {
   if (argv.length === 0) return { command: 'add', arg: undefined, tag: undefined }
   const [first, ...rest] = argv
 
@@ -119,9 +129,17 @@ function excerpt(text: string, limit = 140): string {
   return clean.length <= limit ? clean : `${clean.slice(0, limit - 1)}...`
 }
 
-export async function runCli(argv: string[], deps: AppDeps): Promise<void> {
+export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
   const out = deps.out ?? console
-  const parsed = parseCommand(argv, out)
+  const promptForNewEntry = deps.promptNewEntry ?? promptNewEntry
+  const editInEditor = deps.editEntryInEditor ?? editEntryInEditor
+  let parsed: ParsedCommand
+  try {
+    parsed = parseCommand(argv, out)
+  } catch (error) {
+    if (error instanceof CliExit) return error.exitCode
+    throw error
+  }
 
   ensureStorage(deps.paths)
 
@@ -134,20 +152,20 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<void> {
     await search.ensureSynced(entries)
 
     if (parsed.command === 'add') {
-      const created = db.createEntry(await promptNewEntry(db.listTags()))
+      const created = db.createEntry(await promptForNewEntry(db.listTags()))
       await search.upsert(created)
       out.log(paint.ok(`Saved #${created.id}`))
-      return
+      return 0
     }
 
     if (parsed.command === 'list') {
       const rows = db.listEntries(parsed.tag)
       if (rows.length === 0) {
         out.log(paint.empty('No entries found'))
-        return
+        return 0
       }
       for (const row of rows) printEntry(out, row)
-      return
+      return 0
     }
 
     if (parsed.command === 'get') {
@@ -155,17 +173,17 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<void> {
       const entry = db.getEntry(id)
       if (!entry) throw new Error(`Entry #${id} not found`)
       printFullEntry(out, entry)
-      return
+      return 0
     }
 
     if (parsed.command === 'edit') {
       const id = parseId(parsed.arg, out)
       const entry = db.getEntry(id)
       if (!entry) throw new Error(`Entry #${id} not found`)
-      const updated = db.updateEntry(id, editEntryInEditor(entry))
+      const updated = db.updateEntry(id, editInEditor(entry))
       await search.upsert(updated)
       out.log(paint.ok(`Updated #${updated.id}`))
-      return
+      return 0
     }
 
     if (parsed.command === 'remove') {
@@ -173,7 +191,7 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<void> {
       if (!db.removeEntry(id)) throw new Error(`Entry #${id} not found`)
       await search.remove(id)
       out.log(paint.ok(`Removed #${id}`))
-      return
+      return 0
     }
 
     const term = parsed.arg?.trim()
@@ -182,12 +200,13 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<void> {
     const rows = ids.map((id) => db.getEntry(id)).filter((row) => row !== null)
     if (rows.length === 0) {
       out.log(paint.empty('No matches found'))
-      return
+      return 0
     }
     for (const row of rows) {
       printEntry(out, row)
       out.log(`  ${paint.answer(excerpt(row.answer))}`)
     }
+    return 0
   } finally {
     db.close()
   }

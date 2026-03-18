@@ -13,6 +13,8 @@ function getRealRootDir(env: NodeJS.ProcessEnv): string {
 runCli(process.argv.slice(2), {
   paths: makePaths(getRealRootDir(process.env)),
   now: () => new Date(),
+}).then((exitCode) => {
+  process.exit(exitCode)
 }).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)
   console.error(message)
