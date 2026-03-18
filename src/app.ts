@@ -2,13 +2,14 @@ import { mkdirSync } from 'node:fs'
 import process from 'node:process'
 import { styleText } from 'node:util'
 import { KBDatabase } from './db.ts'
+import type { LinkedEntryRecord } from './db.ts'
 import { KBSearch } from './search.ts'
 import { collectProjectMetadata, formatCodeReferenceAnswer, readCodeReference } from './capture.ts'
 import { deriveQuestion, detectTagsInText, editEntryInEditor, promptNewEntry, readClipboardText } from './prompt.ts'
 import type { StoragePaths } from './paths.ts'
 import { maybeRunDailyBackup } from './backup.ts'
 
-type Command = 'add' | 'list' | 'get' | 'edit' | 'search' | 'remove' | 'tags' | 'tags-add'
+type Command = 'add' | 'list' | 'get' | 'edit' | 'search' | 'remove' | 'tags' | 'tags-add' | 'link'
 type AddOptions = {
   question: string | undefined
   tags: string[]
@@ -20,7 +21,7 @@ type AddOptions = {
   lineStart: number | undefined
   lineEnd: number | undefined
 }
-type ParsedCommand = { command: Command; arg: string | undefined; tag: string | undefined; add: AddOptions | undefined }
+type ParsedCommand = { command: Command; arg: string | undefined; arg2: string | undefined; tag: string | undefined; add: AddOptions | undefined }
 
 export type AppDeps = {
   paths: StoragePaths
@@ -68,6 +69,7 @@ export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1):
   write(`  ${paint.cmd('kb tags add')} ${paint.arg('tag')}          add a tag`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#id')}               show one entry`)
   write(`  ${paint.cmd('kb edit')} ${paint.arg('#id')}              edit one entry`)
+  write(`  ${paint.cmd('kb link')} ${paint.arg('#id #id')}          link two entries`)
   write(`  ${paint.cmd('kb remove')} ${paint.arg('#id')}            remove one entry`)
   write(`  ${paint.cmd('kb search')} ${paint.arg('"query"')}       search entries`)
   write('')
@@ -81,6 +83,7 @@ export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1):
   write(`  ${paint.cmd('kb tags')}`)
   write(`  ${paint.cmd('kb tags add')} ${paint.arg('sqlite')}`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#12')}`)
+  write(`  ${paint.cmd('kb link')} ${paint.arg('#12 #18')}`)
   write(`  ${paint.cmd('kb search')} ${paint.arg('"fts tokenizer"')}`)
   throw new CliExit(exitCode)
 }
@@ -197,11 +200,11 @@ export function parseId(raw: string | undefined, out: Pick<typeof console, 'log'
 }
 
 export function parseCommand(argv: string[], out: Pick<typeof console, 'log' | 'error'>): ParsedCommand {
-  if (argv.length === 0) return { command: 'add', arg: undefined, tag: undefined, add: undefined }
+  if (argv.length === 0) return { command: 'add', arg: undefined, arg2: undefined, tag: undefined, add: undefined }
   const [first, ...rest] = argv
 
   if (first === 'help' || first === '--help' || first === '-h') usage(out, 0)
-  if (first === 'add') return { command: 'add', arg: undefined, tag: undefined, add: parseAddArgs(rest, out) }
+  if (first === 'add') return { command: 'add', arg: undefined, arg2: undefined, tag: undefined, add: parseAddArgs(rest, out) }
 
   if (first === 'list') {
     let tag: string | undefined
@@ -219,19 +222,20 @@ export function parseCommand(argv: string[], out: Pick<typeof console, 'log' | '
       }
       usage(out)
     }
-    return { command: 'list', arg: undefined, tag, add: undefined }
+    return { command: 'list', arg: undefined, arg2: undefined, tag, add: undefined }
   }
 
   if (first === 'tags') {
-    if (rest.length === 0) return { command: 'tags', arg: undefined, tag: undefined, add: undefined }
-    if (rest[0] === 'add' && rest.length === 2) return { command: 'tags-add', arg: rest[1], tag: undefined, add: undefined }
+    if (rest.length === 0) return { command: 'tags', arg: undefined, arg2: undefined, tag: undefined, add: undefined }
+    if (rest[0] === 'add' && rest.length === 2) return { command: 'tags-add', arg: rest[1], arg2: undefined, tag: undefined, add: undefined }
     usage(out)
   }
 
-  if (first === 'get') return { command: 'get', arg: rest[0], tag: undefined, add: undefined }
-  if (first === 'edit') return { command: 'edit', arg: rest[0], tag: undefined, add: undefined }
-  if (first === 'remove') return { command: 'remove', arg: rest[0], tag: undefined, add: undefined }
-  if (first === 'search') return { command: 'search', arg: rest.join(' ').trim(), tag: undefined, add: undefined }
+  if (first === 'get') return { command: 'get', arg: rest[0], arg2: undefined, tag: undefined, add: undefined }
+  if (first === 'edit') return { command: 'edit', arg: rest[0], arg2: undefined, tag: undefined, add: undefined }
+  if (first === 'link' && rest.length === 2) return { command: 'link', arg: rest[0], arg2: rest[1], tag: undefined, add: undefined }
+  if (first === 'remove') return { command: 'remove', arg: rest[0], arg2: undefined, tag: undefined, add: undefined }
+  if (first === 'search') return { command: 'search', arg: rest.join(' ').trim(), arg2: undefined, tag: undefined, add: undefined }
   usage(out)
 }
 
@@ -254,12 +258,25 @@ function printFullEntry(out: Pick<typeof console, 'log' | 'error'>, entry: {
   tags: string[]
   createdAt: string
   updatedAt: string
-}): void {
+  addedVia: string
+  viewCount: number
+  lastViewedAt: string | null
+}, linkedEntries: LinkedEntryRecord[]): void {
   printEntry(out, entry)
+  out.log(`  ${paint.label('Added via:')} ${entry.addedVia}`)
   out.log(`  ${paint.label('Created:')} ${paint.date(entry.createdAt)}`)
   out.log(`  ${paint.label('Updated:')} ${paint.date(entry.updatedAt)}`)
+  out.log(`  ${paint.label('Views:')} ${String(entry.viewCount)}`)
+  if (entry.lastViewedAt) out.log(`  ${paint.label('Last viewed:')} ${paint.date(entry.lastViewedAt)}`)
   out.log('')
   out.log(entry.answer)
+  if (linkedEntries.length > 0) {
+    out.log('')
+    out.log(`  ${paint.label('Linked notes:')}`)
+    for (const linkedEntry of linkedEntries) {
+      out.log(`  ${paint.id(`#${linkedEntry.id}`)} ${paint.question(linkedEntry.question)}`)
+    }
+  }
 }
 
 function excerpt(text: string, limit = 140): string {
@@ -287,6 +304,7 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
   const db = new KBDatabase(deps.paths.dbPath)
   try {
     await maybeRunDailyBackup(db.sqlite, deps.paths.backupDir, deps.now())
+    await db.ensureSchema(deps.paths.backupDir, deps.now())
 
     const search = new KBSearch(deps.paths.searchPath)
     const entries = db.allEntries()
@@ -296,11 +314,12 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
       const existingTags = db.listTags()
       let entry
 
-      if (!hasAddFlags(parsed.add)) {
-        entry = await promptForNewEntry(existingTags)
-      } else if (parsed.add?.format === 'code-reference') {
-        const reference = readCodeReference({
-          cwd,
+        if (!hasAddFlags(parsed.add)) {
+          const captured = await promptForNewEntry(existingTags)
+          entry = { ...captured, addedVia: 'interactive' }
+        } else if (parsed.add?.format === 'code-reference') {
+          const reference = readCodeReference({
+            cwd,
           file: parsed.add.file!,
           lineStart: parsed.add.lineStart!,
           lineEnd: parsed.add.lineEnd!,
@@ -312,31 +331,33 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
           lineEnd: parsed.add.lineEnd!,
           absoluteFile: reference.absoluteFile,
         })
-        entry = {
-          question: parsed.add.question?.trim() || reference.question,
-          answer: formatCodeReferenceAnswer({
+          entry = {
+            question: parsed.add.question?.trim() || reference.question,
+            answer: formatCodeReferenceAnswer({
             snippet: reference.snippet,
             language: reference.language,
             metadata,
             lineStart: parsed.add.lineStart!,
             lineEnd: parsed.add.lineEnd!,
-          }),
-          tags: metadata.projectName ? [metadata.projectName] : [],
-        }
-      } else {
-        let answer = parsed.add?.answer
+            }),
+            tags: metadata.projectName ? [metadata.projectName] : [],
+            addedVia: 'code-reference',
+          }
+        } else {
+          let answer = parsed.add?.answer
         if (!answer && parsed.add?.stdin) answer = await readStdin()
         if (!answer && parsed.add?.fromClipboard) answer = readClipboard()
         if (!answer?.trim()) throw new Error('Answer required when using kb add flags')
 
         const question = parsed.add?.question?.trim() || deriveQuestion(answer)
         const tags = detectTagsInText(`${question}\n\n${answer}`, existingTags)
-        entry = {
-          question,
-          answer: answer.trim(),
-          tags: [...new Set([...(parsed.add?.tags ?? []), ...tags])],
+          entry = {
+            question,
+            answer: answer.trim(),
+            tags: [...new Set([...(parsed.add?.tags ?? []), ...tags])],
+            addedVia: parsed.add?.stdin ? 'stdin' : parsed.add?.fromClipboard ? 'clipboard' : 'inline',
+          }
         }
-      }
 
       const created = db.createEntry(entry)
       await search.upsert(created)
@@ -374,7 +395,10 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
       const id = parseId(parsed.arg, out)
       const entry = db.getEntry(id)
       if (!entry) throw new Error(`Entry #${id} not found`)
-      printFullEntry(out, entry)
+      db.recordView(id, 'get')
+      const viewedEntry = db.getEntry(id)
+      if (!viewedEntry) throw new Error(`Entry #${id} not found`)
+      printFullEntry(out, viewedEntry, db.listLinkedEntries(id))
       return 0
     }
 
@@ -396,10 +420,22 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
       return 0
     }
 
+    if (parsed.command === 'link') {
+      const leftId = parseId(parsed.arg, out)
+      const rightId = parseId(parsed.arg2, out)
+      if (leftId === rightId) throw new Error('Cannot link an entry to itself')
+      if (!db.getEntry(leftId)) throw new Error(`Entry #${leftId} not found`)
+      if (!db.getEntry(rightId)) throw new Error(`Entry #${rightId} not found`)
+      db.createLink(leftId, rightId)
+      out.log(paint.ok(`Linked #${leftId} and #${rightId}`))
+      return 0
+    }
+
     const term = parsed.arg?.trim()
     if (!term) usage(out)
     const ids = await search.searchIds(term)
     const rows = ids.map((id) => db.getEntry(id)).filter((row) => row !== null)
+    db.recordSearch(term, rows.length, 'search')
     if (rows.length === 0) {
       out.log(paint.empty('No matches found'))
       return 0

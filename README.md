@@ -10,6 +10,8 @@ It stores entries in SQLite, keeps search fast with a local index, and stays ent
 - List all entries or filter by tag
 - Open any entry by `#id`
 - Edit entries in your terminal editor
+- Track explicit `kb get` views and search history
+- Link related notes with `kb link`
 - Search questions, answers, and tags
 - Store data locally with no external service
 
@@ -58,6 +60,7 @@ kb tags
 kb tags add tag
 kb get #id
 kb edit #id
+kb link #id #id
 kb remove #id
 kb search "query"
 ```
@@ -76,6 +79,7 @@ kb tags
 kb tags add sqlite
 kb get #12
 kb edit #12
+kb link #12 #18
 kb search "fts tokenizer"
 ```
 
@@ -119,6 +123,13 @@ This keeps the selected code source-of-truth on disk, avoids multiline quoting i
 
 When editing an existing entry, `kb` opens your editor using `VISUAL`, then `EDITOR`, then `vi`.
 
+## Metadata And History
+
+- each entry stores how it was added, such as `interactive`, `inline`, `stdin`, `clipboard`, or `code-reference`
+- `kb get #id` records a raw view event and updates the entry view count and last viewed time
+- `kb search "query"` records a raw search event with the query and result count
+- `kb link #id #id` creates an undirected link that appears on both linked entries
+
 ## Storage
 
 `kb` stores data in:
@@ -131,8 +142,10 @@ Files:
 - `kb.sqlite` for entries and tags
 - `search-index.json` for the search index
 - `backups/kb-YYYY-MM-DD.sqlite` for daily SQLite backups
+- `backups/kb-pre-migration-YYYY-MM-DDTHH-MM-SS.sqlite` for explicit pre-migration backups
 
 On the first real CLI command each day, `kb` creates a SQLite backup and keeps the most recent 7 daily backups.
+When `kb` needs to migrate an older schema, it also creates a separate pre-migration backup first.
 
 ## Safety Model
 

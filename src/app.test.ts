@@ -27,17 +27,17 @@ function makeMissingRoot(): string {
 describe('app parsing', () => {
   it('parses list tag arguments', () => {
     const { out } = makeOut()
-    expect(parseCommand(['list', '--tag=sqlite'], out)).toEqual({ command: 'list', arg: undefined, tag: 'sqlite', add: undefined })
+    expect(parseCommand(['list', '--tag=sqlite'], out)).toEqual({ command: 'list', arg: undefined, arg2: undefined, tag: 'sqlite', add: undefined })
   })
 
   it('parses tags list command', () => {
     const { out } = makeOut()
-    expect(parseCommand(['tags'], out)).toEqual({ command: 'tags', arg: undefined, tag: undefined, add: undefined })
+    expect(parseCommand(['tags'], out)).toEqual({ command: 'tags', arg: undefined, arg2: undefined, tag: undefined, add: undefined })
   })
 
   it('parses tags add command', () => {
     const { out } = makeOut()
-    expect(parseCommand(['tags', 'add', 'Full Text Search'], out)).toEqual({ command: 'tags-add', arg: 'Full Text Search', tag: undefined, add: undefined })
+    expect(parseCommand(['tags', 'add', 'Full Text Search'], out)).toEqual({ command: 'tags-add', arg: 'Full Text Search', arg2: undefined, tag: undefined, add: undefined })
   })
 
   it('parses scripted add arguments', () => {
@@ -45,6 +45,7 @@ describe('app parsing', () => {
     expect(parseCommand(['add', '--stdin', '--tag=sqlite', '--tag', 'fts'], out)).toEqual({
       command: 'add',
       arg: undefined,
+      arg2: undefined,
       tag: undefined,
       add: {
         question: undefined,
@@ -65,6 +66,7 @@ describe('app parsing', () => {
     expect(parseCommand(['add', '--file=src/app.ts', '--line-start=1', '--line-end=5', '--format=code-reference'], out)).toEqual({
       command: 'add',
       arg: undefined,
+      arg2: undefined,
       tag: undefined,
       add: {
         question: undefined,
@@ -78,6 +80,11 @@ describe('app parsing', () => {
         lineEnd: 5,
       },
     })
+  })
+
+  it('parses link arguments', () => {
+    const { out } = makeOut()
+    expect(parseCommand(['link', '#12', '18'], out)).toEqual({ command: 'link', arg: '#12', arg2: '18', tag: undefined, add: undefined })
   })
 
   it('parses numeric ids with # prefix', () => {

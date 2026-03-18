@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { formatBackupDay, listBackupFiles, maybeRunDailyBackup } from './backup.ts'
+import { createMigrationBackup, formatBackupDay, listBackupFiles, listMigrationBackupFiles, maybeRunDailyBackup } from './backup.ts'
 
 const openDbs: DatabaseSync[] = []
 
@@ -63,5 +63,19 @@ describe('backup helpers', () => {
       'kb-2026-03-16.sqlite',
       'kb-2026-03-17.sqlite',
     ])
+  })
+
+  it('creates explicit migration backups without affecting daily backup retention', async () => {
+    const dir = makeTempDir()
+    const db = openDb(join(dir, 'kb.sqlite'))
+    const backupDir = join(dir, 'backups')
+
+    const target = await createMigrationBackup(db, backupDir, new Date('2026-03-18T12:00:00Z'))
+
+    expect(target).toMatch(/kb-pre-migration-2026-03-18T\d{2}-\d{2}-\d{2}\.sqlite$/)
+    expect(listMigrationBackupFiles(backupDir)).toEqual([
+      expect.stringMatching(/^kb-pre-migration-2026-03-18T\d{2}-\d{2}-\d{2}\.sqlite$/),
+    ])
+    expect(listBackupFiles(backupDir)).toEqual([])
   })
 })

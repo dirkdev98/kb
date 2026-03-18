@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { runCli } from './app.ts'
 import { makePaths } from './paths.ts'
@@ -47,6 +48,15 @@ describe('runCli integration', () => {
     result = makeOut()
     expect(await runCli(['get', '#1'], { paths, now: () => day, out: result.out })).toBe(0)
     expect(result.logs.join('\n')).toContain('They run daily.')
+    expect(result.logs.join('\n')).toContain('Added via: interactive')
+    expect(result.logs.join('\n')).toContain('Views: 1')
+
+    let db = new DatabaseSync(paths.dbPath)
+    try {
+      expect((db.prepare('select count(*) as count from entry_views').get() as { count: number }).count).toBe(1)
+    } finally {
+      db.close()
+    }
 
     result = makeOut()
     expect(await runCli(['search', 'daily'], { paths, now: () => day, out: result.out })).toBe(0)
@@ -80,6 +90,14 @@ describe('runCli integration', () => {
     expect(existsSync(paths.dbPath)).toBe(true)
     expect(existsSync(paths.searchPath)).toBe(true)
     expect(existsSync(join(paths.backupDir, 'kb-2026-03-18.sqlite'))).toBe(true)
+
+    db = new DatabaseSync(paths.dbPath)
+    try {
+      expect((db.prepare('select count(*) as count from entry_views').get() as { count: number }).count).toBe(0)
+      expect((db.prepare('select count(*) as count from search_events').get() as { count: number }).count).toBe(2)
+    } finally {
+      db.close()
+    }
   })
 
   it('keeps bad args from touching injected storage', async () => {
@@ -156,6 +174,93 @@ describe('runCli integration', () => {
     })).toBe(0)
 
     expect(result.logs.join('\n')).toContain('Saved #1')
+  })
+
+  it('shows linked notes from either side', async () => {
+    const paths = makePathsForTest()
+    const day = new Date('2026-03-18T12:00:00Z')
+
+    await runCli(['add', '--answer', 'First note'], {
+      paths,
+      now: () => day,
+      out: makeOut().out,
+    })
+
+    await runCli(['add', '--answer', 'Second note'], {
+      paths,
+      now: () => day,
+      out: makeOut().out,
+    })
+
+    const linkResult = makeOut()
+    expect(await runCli(['link', '1', '2'], { paths, now: () => day, out: linkResult.out })).toBe(0)
+    expect(linkResult.logs.join('\n')).toContain('Linked #1 and #2')
+
+    let result = makeOut()
+    expect(await runCli(['get', '#1'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs.join('\n')).toContain('Linked notes:')
+    expect(result.logs.join('\n')).toContain('#2')
+    expect(result.logs.join('\n')).toContain('Second note')
+
+    result = makeOut()
+    expect(await runCli(['get', '#2'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs.join('\n')).toContain('#1')
+    expect(result.logs.join('\n')).toContain('First note')
+  })
+
+  it('creates a separate backup before migrating legacy schema', async () => {
+    const paths = makePathsForTest()
+    const day = new Date('2026-03-18T12:00:00Z')
+    mkdirSync(paths.dataDir, { recursive: true })
+    const legacy = new DatabaseSync(paths.dbPath)
+    try {
+      legacy.exec(`
+        create table entries (
+          id integer primary key autoincrement,
+          question text not null,
+          answer text not null,
+          created_at text not null default current_timestamp,
+          updated_at text not null default current_timestamp
+        );
+        create table tags (
+          id integer primary key autoincrement,
+          name text not null unique
+        );
+        create table entry_tags (
+          entry_id integer not null,
+          tag_id integer not null,
+          primary key (entry_id, tag_id),
+          foreign key (entry_id) references entries(id) on delete cascade,
+          foreign key (tag_id) references tags(id) on delete cascade
+        );
+        insert into entries (question, answer, created_at, updated_at)
+        values ('Legacy note', 'Still here.', current_timestamp, current_timestamp);
+      `)
+    } finally {
+      legacy.close()
+    }
+
+    const result = makeOut()
+    expect(await runCli(['get', '#1'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs.join('\n')).toContain('Legacy note')
+    expect(result.logs.join('\n')).toContain('Added via: interactive')
+    expect(result.logs.join('\n')).toContain('Views: 1')
+
+    const backupFiles = readdirSync(paths.backupDir).sort()
+    expect(backupFiles).toContain('kb-2026-03-18.sqlite')
+    expect(backupFiles.some((file) => /^kb-pre-migration-2026-03-18T\d{2}-\d{2}-\d{2}\.sqlite$/.test(file))).toBe(true)
+
+    const migrated = new DatabaseSync(paths.dbPath)
+    try {
+      expect((migrated.prepare('select user_version from pragma_user_version').get() as { user_version: number }).user_version).toBe(1)
+      expect((migrated.prepare('select added_via as addedVia, view_count as viewCount from entries where id = 1').get() as { addedVia: string; viewCount: number })).toEqual({
+        addedVia: 'interactive',
+        viewCount: 1,
+      })
+      expect((migrated.prepare('select count(*) as count from entry_views').get() as { count: number }).count).toBe(1)
+    } finally {
+      migrated.close()
+    }
   })
 
   it('lists and adds standalone tags', async () => {
