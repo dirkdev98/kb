@@ -1,17 +1,16 @@
 #!/usr/bin/env -S node --experimental-strip-types
 
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import process from 'node:process'
+import { join } from 'node:path'
 import { runCli } from './app.ts'
 import { makePaths } from './paths.ts'
 
-function getRealRootDir(env: NodeJS.ProcessEnv): string {
-  return env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share')
-}
+const rootDir = process.env.KB_TEST_ROOT ?? mkdtempSync(join(tmpdir(), 'kb-test-'))
 
 runCli(process.argv.slice(2), {
-  paths: makePaths(getRealRootDir(process.env)),
+  paths: makePaths(rootDir),
   now: () => new Date(),
 }).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error)

@@ -31,6 +31,12 @@ Run directly in dev mode:
 npm run dev
 ```
 
+Run against an isolated temp data root:
+
+```bash
+npm run dev:test
+```
+
 Optionally link the CLI locally:
 
 ```bash
@@ -82,6 +88,16 @@ Files:
 
 - `kb.sqlite` for entries and tags
 - `search-index.json` for the search index
+- `backups/kb-YYYY-MM-DD.sqlite` for daily SQLite backups
+
+On the first real CLI command each day, `kb` creates a SQLite backup and keeps the most recent 7 daily backups.
+
+## Safety Model
+
+- Shared app code never discovers real storage locations on its own
+- `src/cli.ts` is the only launcher that injects your real data root
+- `src/test-cli.ts` injects an isolated temp root by default
+- `kb --help` and invalid commands exit before opening the database
 
 Tags are normalized to lowercase slugs, so `Full Text Search` becomes `full-text-search`.
 

@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite'
-import { getDbPath } from './paths.ts'
 
 export type EntryRecord = {
   id: number
@@ -29,8 +28,8 @@ function uniqTags(tags: string[]): string[] {
 export class KBDatabase {
   private readonly db: DatabaseSync
 
-  constructor() {
-    this.db = new DatabaseSync(getDbPath())
+  constructor(dbPath: string) {
+    this.db = new DatabaseSync(dbPath)
     this.db.exec('pragma foreign_keys = on')
     this.db.exec('pragma busy_timeout = 5000')
     this.db.exec(`
@@ -59,6 +58,10 @@ export class KBDatabase {
 
   close(): void {
     this.db.close()
+  }
+
+  get sqlite(): DatabaseSync {
+    return this.db
   }
 
   createEntry(input: { question: string; answer: string; tags: string[] }): EntryRecord {

@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { create, insertMultiple, remove, search } from '@orama/orama'
 import type { AnyOrama, Results } from '@orama/orama'
-import { getSearchPath } from './paths.ts'
 import type { EntryRecord } from './db.ts'
 
 type SearchDoc = {
@@ -37,11 +36,12 @@ function toDoc(entry: EntryRecord): SearchDoc {
 }
 
 export class KBSearch {
-  private readonly path = getSearchPath()
+  private readonly path: string
   private indexPromise: Promise<AnyOrama>
   private docMap = new Map<string, SearchDoc>()
 
-  constructor() {
+  constructor(path: string) {
+    this.path = path
     this.indexPromise = this.load()
   }
 
