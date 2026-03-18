@@ -148,6 +148,13 @@ export class KBDatabase {
     return rows.map((row) => row.name)
   }
 
+  createTag(tag: string): string {
+    const name = slugTag(tag)
+    if (!name) throw new Error('Tag required')
+    this.db.prepare('insert into tags (name) values (?) on conflict(name) do nothing').run(name)
+    return name
+  }
+
   allEntries(): EntryRecord[] {
     const rows = this.db
       .prepare('select id, question, answer, created_at, updated_at from entries order by id asc')

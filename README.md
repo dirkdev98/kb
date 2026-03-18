@@ -6,6 +6,7 @@ It stores entries in SQLite, keeps search fast with a local index, and stays ent
 ## Features
 
 - Add notes with a question, tags, and a multi-line answer
+- List all tags or create new standalone tags
 - List all entries or filter by tag
 - Open any entry by `#id`
 - Edit entries in your terminal editor
@@ -53,6 +54,8 @@ kb add --stdin [--question=text] [--tag=tag]
 kb add --from-clipboard [--question=text] [--tag=tag]
 kb add --file=path --line-start=n --line-end=n --format=code-reference
 kb list [--tag=tag]
+kb tags
+kb tags add tag
 kb get #id
 kb edit #id
 kb remove #id
@@ -69,6 +72,8 @@ kb add --from-clipboard --tag=chrome
 kb add --file=src/app.ts --line-start=1 --line-end=8 --format=code-reference
 kb list
 kb list --tag=sqlite
+kb tags
+kb tags add sqlite
 kb get #12
 kb edit #12
 kb search "fts tokenizer"

@@ -30,6 +30,16 @@ describe('app parsing', () => {
     expect(parseCommand(['list', '--tag=sqlite'], out)).toEqual({ command: 'list', arg: undefined, tag: 'sqlite', add: undefined })
   })
 
+  it('parses tags list command', () => {
+    const { out } = makeOut()
+    expect(parseCommand(['tags'], out)).toEqual({ command: 'tags', arg: undefined, tag: undefined, add: undefined })
+  })
+
+  it('parses tags add command', () => {
+    const { out } = makeOut()
+    expect(parseCommand(['tags', 'add', 'Full Text Search'], out)).toEqual({ command: 'tags-add', arg: 'Full Text Search', tag: undefined, add: undefined })
+  })
+
   it('parses scripted add arguments', () => {
     const { out } = makeOut()
     expect(parseCommand(['add', '--stdin', '--tag=sqlite', '--tag', 'fts'], out)).toEqual({

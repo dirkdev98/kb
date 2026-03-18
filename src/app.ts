@@ -8,7 +8,7 @@ import { deriveQuestion, detectTagsInText, editEntryInEditor, promptNewEntry, re
 import type { StoragePaths } from './paths.ts'
 import { maybeRunDailyBackup } from './backup.ts'
 
-type Command = 'add' | 'list' | 'get' | 'edit' | 'search' | 'remove'
+type Command = 'add' | 'list' | 'get' | 'edit' | 'search' | 'remove' | 'tags' | 'tags-add'
 type AddOptions = {
   question: string | undefined
   tags: string[]
@@ -64,6 +64,8 @@ export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1):
   write(`  ${paint.cmd('kb add')} ${paint.arg('--from-clipboard')}    add from clipboard`)
   write(`  ${paint.cmd('kb add')} ${paint.arg('--file=path --line-start=n --line-end=n --format=code-reference')}`)
   write(`  ${paint.cmd('kb list')} ${paint.arg('[--tag=tag]')}       list entries`)
+  write(`  ${paint.cmd('kb tags')}                    list tags`)
+  write(`  ${paint.cmd('kb tags add')} ${paint.arg('tag')}          add a tag`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#id')}               show one entry`)
   write(`  ${paint.cmd('kb edit')} ${paint.arg('#id')}              edit one entry`)
   write(`  ${paint.cmd('kb remove')} ${paint.arg('#id')}            remove one entry`)
@@ -76,6 +78,8 @@ export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1):
   write(`  ${paint.cmd('kb add')} ${paint.arg('--from-clipboard --tag=chrome')}`)
   write(`  ${paint.cmd('kb add')} ${paint.arg('--file=src/app.ts --line-start=1 --line-end=8 --format=code-reference')}`)
   write(`  ${paint.cmd('kb list')} ${paint.arg('--tag=sqlite')}`)
+  write(`  ${paint.cmd('kb tags')}`)
+  write(`  ${paint.cmd('kb tags add')} ${paint.arg('sqlite')}`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#12')}`)
   write(`  ${paint.cmd('kb search')} ${paint.arg('"fts tokenizer"')}`)
   throw new CliExit(exitCode)
@@ -218,6 +222,12 @@ export function parseCommand(argv: string[], out: Pick<typeof console, 'log' | '
     return { command: 'list', arg: undefined, tag, add: undefined }
   }
 
+  if (first === 'tags') {
+    if (rest.length === 0) return { command: 'tags', arg: undefined, tag: undefined, add: undefined }
+    if (rest[0] === 'add' && rest.length === 2) return { command: 'tags-add', arg: rest[1], tag: undefined, add: undefined }
+    usage(out)
+  }
+
   if (first === 'get') return { command: 'get', arg: rest[0], tag: undefined, add: undefined }
   if (first === 'edit') return { command: 'edit', arg: rest[0], tag: undefined, add: undefined }
   if (first === 'remove') return { command: 'remove', arg: rest[0], tag: undefined, add: undefined }
@@ -341,6 +351,22 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
         return 0
       }
       for (const row of rows) printEntry(out, row)
+      return 0
+    }
+
+    if (parsed.command === 'tags') {
+      const tags = db.listTags()
+      if (tags.length === 0) {
+        out.log(paint.empty('No tags found'))
+        return 0
+      }
+      for (const tag of tags) out.log(tag)
+      return 0
+    }
+
+    if (parsed.command === 'tags-add') {
+      const tag = db.createTag(parsed.arg ?? '')
+      out.log(paint.ok(`Saved tag ${tag}`))
       return 0
     }
 

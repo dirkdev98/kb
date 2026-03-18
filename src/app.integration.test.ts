@@ -158,6 +158,28 @@ describe('runCli integration', () => {
     expect(result.logs.join('\n')).toContain('Saved #1')
   })
 
+  it('lists and adds standalone tags', async () => {
+    const paths = makePathsForTest()
+    const day = new Date('2026-03-18T12:00:00Z')
+
+    let result = makeOut()
+    expect(await runCli(['tags'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs.join('\n')).toContain('No tags found')
+
+    result = makeOut()
+    expect(await runCli(['tags', 'add', 'Full Text Search'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs.join('\n')).toContain('Saved tag full-text-search')
+
+    result = makeOut()
+    expect(await runCli(['tags', 'add', 'Full Text Search'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs.join('\n')).toContain('Saved tag full-text-search')
+
+    result = makeOut()
+    expect(await runCli(['tags'], { paths, now: () => day, out: result.out })).toBe(0)
+    expect(result.logs).toContain('full-text-search')
+    expect(result.logs.filter((line) => line === 'full-text-search')).toHaveLength(1)
+  })
+
   it('supports code-reference add from file and line range', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kb-code-ref-test-'))
     const paths = makePaths(root)
