@@ -1,0 +1,21 @@
+{
+  "name": "kb",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "kb": "./src/cli.ts"
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "dev": "node --experimental-strip-types src/cli.ts"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "enquirer": "^2.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.3"
+  }
+}
