@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -108,5 +108,104 @@ describe('runCli integration', () => {
     expect(JSON.parse(readFileSync(paths.searchPath, 'utf8'))).toMatchObject({
       version: 1,
     })
+  })
+
+  it('supports scripted add from stdin with derived question and detected tags', async () => {
+    const paths = makePathsForTest()
+    const day = new Date('2026-03-18T12:00:00Z')
+
+    await runCli([], {
+      paths,
+      now: () => day,
+      out: makeOut().out,
+      promptNewEntry: async () => ({
+        question: 'Seed',
+        tags: ['sqlite', 'full-text-search'],
+        answer: 'Seed tags.',
+      }),
+    })
+
+    const result = makeOut()
+    expect(await runCli(['add', '--stdin', '--tag', 'cli'], {
+      paths,
+      now: () => day,
+      out: result.out,
+      readStdin: async () => '# SQLite FTS\n\nUse Full Text Search for docs.',
+    })).toBe(0)
+
+    expect(result.logs.join('\n')).toContain('Saved #2')
+
+    result.logs.length = 0
+    expect(await runCli(['get', '#2'], { paths, now: () => day, out: result.out })).toBe(0)
+    const output = result.logs.join('\n')
+    expect(output).toContain('SQLite FTS')
+    expect(output).toContain('cli')
+    expect(output).toContain('sqlite')
+    expect(output).toContain('full-text-search')
+  })
+
+  it('supports scripted add from clipboard', async () => {
+    const paths = makePathsForTest()
+    const result = makeOut()
+
+    expect(await runCli(['add', '--from-clipboard'], {
+      paths,
+      now: () => new Date('2026-03-18T12:00:00Z'),
+      out: result.out,
+      readClipboard: () => '<h1>Chrome note</h1><p>Use context menus.</p>',
+    })).toBe(0)
+
+    expect(result.logs.join('\n')).toContain('Saved #1')
+  })
+
+  it('supports code-reference add from file and line range', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kb-code-ref-test-'))
+    const paths = makePaths(root)
+    writeFileSync(join(root, 'example.ts'), [
+      'const nope = 0',
+      '// Why normalize tags?',
+      'const value = normalize(input)',
+    ].join('\n'))
+
+    const result = makeOut()
+    expect(await runCli(['add', '--file=example.ts', '--line-start=2', '--line-end=3', '--format=code-reference'], {
+      paths,
+      now: () => new Date('2026-03-18T12:00:00Z'),
+      out: result.out,
+      cwd: root,
+    })).toBe(0)
+
+    result.logs.length = 0
+    expect(await runCli(['get', '#1'], { paths, now: () => new Date('2026-03-18T12:00:00Z'), out: result.out, cwd: root })).toBe(0)
+    const output = result.logs.join('\n')
+    expect(output).toContain('Why normalize tags?')
+    expect(output).toContain('File: `example.ts:2-3`')
+    expect(output).toContain('Project: `kb-code-ref-test-')
+    expect(output).toContain('```ts')
+  })
+
+  it('supports markdown code-reference add without a leading comment', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kb-code-ref-md-test-'))
+    const paths = makePaths(root)
+    writeFileSync(join(root, 'note.md'), [
+      '# SQLite FTS',
+      '',
+      'Use `unicode61` tokenizer.',
+    ].join('\n'))
+
+    const result = makeOut()
+    expect(await runCli(['add', '--file=note.md', '--line-start=1', '--line-end=3', '--format=code-reference'], {
+      paths,
+      now: () => new Date('2026-03-18T12:00:00Z'),
+      out: result.out,
+      cwd: root,
+    })).toBe(0)
+
+    result.logs.length = 0
+    expect(await runCli(['get', '#1'], { paths, now: () => new Date('2026-03-18T12:00:00Z'), out: result.out, cwd: root })).toBe(0)
+    const output = result.logs.join('\n')
+    expect(output).toContain('SQLite FTS')
+    expect(output).toContain('File: `note.md:1-3`')
+    expect(output).toContain('```md')
   })
 })

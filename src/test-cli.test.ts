@@ -9,7 +9,7 @@ const entry = join(process.cwd(), 'src', 'test-cli.ts')
 describe('test-cli smoke', () => {
   it('uses injected test root only', () => {
     const root = mkdtempSync(join(tmpdir(), 'kb-test-cli-'))
-    const result = spawnSync('node', ['--experimental-strip-types', entry, 'list'], {
+    const result = spawnSync('node', ['--disable-warning=ExperimentalWarning', '--experimental-strip-types', entry, 'list'], {
       env: { ...process.env, KB_TEST_ROOT: root },
       encoding: 'utf8',
     })
@@ -22,7 +22,7 @@ describe('test-cli smoke', () => {
 
   it('help does not create storage', () => {
     const root = mkdtempSync(join(tmpdir(), 'kb-test-cli-'))
-    const result = spawnSync('node', ['--experimental-strip-types', entry, '--help'], {
+    const result = spawnSync('node', ['--disable-warning=ExperimentalWarning', '--experimental-strip-types', entry, '--help'], {
       env: { ...process.env, KB_TEST_ROOT: root },
       encoding: 'utf8',
     })

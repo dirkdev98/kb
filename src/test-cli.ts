@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning --experimental-strip-types
 
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'

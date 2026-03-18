@@ -27,12 +27,69 @@ function makeMissingRoot(): string {
 describe('app parsing', () => {
   it('parses list tag arguments', () => {
     const { out } = makeOut()
-    expect(parseCommand(['list', '--tag=sqlite'], out)).toEqual({ command: 'list', arg: undefined, tag: 'sqlite' })
+    expect(parseCommand(['list', '--tag=sqlite'], out)).toEqual({ command: 'list', arg: undefined, tag: 'sqlite', add: undefined })
+  })
+
+  it('parses scripted add arguments', () => {
+    const { out } = makeOut()
+    expect(parseCommand(['add', '--stdin', '--tag=sqlite', '--tag', 'fts'], out)).toEqual({
+      command: 'add',
+      arg: undefined,
+      tag: undefined,
+      add: {
+        question: undefined,
+        tags: ['sqlite', 'fts'],
+        answer: undefined,
+        stdin: true,
+        fromClipboard: false,
+        format: undefined,
+        file: undefined,
+        lineStart: undefined,
+        lineEnd: undefined,
+      },
+    })
+  })
+
+  it('parses code-reference add arguments', () => {
+    const { out } = makeOut()
+    expect(parseCommand(['add', '--file=src/app.ts', '--line-start=1', '--line-end=5', '--format=code-reference'], out)).toEqual({
+      command: 'add',
+      arg: undefined,
+      tag: undefined,
+      add: {
+        question: undefined,
+        tags: [],
+        answer: undefined,
+        stdin: false,
+        fromClipboard: false,
+        format: 'code-reference',
+        file: 'src/app.ts',
+        lineStart: 1,
+        lineEnd: 5,
+      },
+    })
   })
 
   it('parses numeric ids with # prefix', () => {
     const { out } = makeOut()
     expect(parseId('#12', out)).toBe(12)
+  })
+
+  it('rejects multiple scripted answer sources', () => {
+    const { out } = makeOut()
+    expect(() => parseCommand(['add', '--stdin', '--from-clipboard'], out)).toThrow('Use only one answer source')
+  })
+
+  it('rejects code-reference with answer source', () => {
+    const { out } = makeOut()
+    expect(() => parseCommand(['add', '--file=a.ts', '--line-start=1', '--line-end=2', '--format=code-reference', '--stdin'], out))
+      .toThrow('code-reference format reads from --file and line range')
+  })
+
+  it('rejects explicit tags for code-reference', () => {
+    const { out } = makeOut()
+    expect(() => parseCommand(['add', '--file=a.ts', '--line-start=1', '--line-end=2', '--format=code-reference', '--tag=ts'], out))
+      .toThrow('code-reference format auto-tags')
   })
 })
 

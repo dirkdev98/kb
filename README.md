@@ -48,6 +48,10 @@ kb
 
 ```text
 kb
+kb add --answer="..." [--question=text] [--tag=tag]
+kb add --stdin [--question=text] [--tag=tag]
+kb add --from-clipboard [--question=text] [--tag=tag]
+kb add --file=path --line-start=n --line-end=n --format=code-reference
 kb list [--tag=tag]
 kb get #id
 kb edit #id
@@ -59,6 +63,10 @@ kb search "query"
 
 ```bash
 kb
+kb add --question="SQLite FTS" --tag=sqlite --answer="Use unicode61 tokenizer"
+pbpaste | kb add --stdin --tag=sqlite
+kb add --from-clipboard --tag=chrome
+kb add --file=src/app.ts --line-start=1 --line-end=8 --format=code-reference
 kb list
 kb list --tag=sqlite
 kb get #12
@@ -74,6 +82,35 @@ kb search "fts tokenizer"
 - Type the answer across multiple lines
 - Finish the answer with two blank lines
 - Type `/editor` on the first answer line to switch to your editor
+
+## Quick Capture
+
+- `kb add --answer="..."` saves directly without prompts
+- `kb add --stdin` reads the answer from standard input
+- `kb add --from-clipboard` reads the answer from the macOS clipboard via `pbpaste`
+- omit `--question` to derive it from the first cleaned sentence or line of the answer
+- existing tags mentioned in the question or answer are auto-added
+- explicit `--tag` flags are merged with detected tags
+
+## Code References
+
+- `kb add --file=path --line-start=n --line-end=n --format=code-reference` reads the selected code directly from disk
+- code files must begin with a comment; `kb` uses that leading comment to infer the question
+- markdown files use the normal cleaned-text question derivation instead
+- `kb` stores a markdown answer with file, project, branch, commit, GitHub permalink when available, then a fenced code block
+- project metadata is best-effort and never required for the save to succeed
+- code-reference entries auto-tag only the current project name
+
+## WebStorm
+
+Create an External Tool with:
+
+- Program: `kb`
+- Arguments: `add --file="$FileRelativePath$" --line-start="$SelectionStartLine$" --line-end="$SelectionEndLine$" --format=code-reference`
+- Working directory: `$ProjectFileDir$`
+- Options: enable `Open console for tool output` and `Make console active on message in stderr`
+
+This keeps the selected code source-of-truth on disk, avoids multiline quoting issues, and pops open the Run console on failures.
 
 When editing an existing entry, `kb` opens your editor using `VISUAL`, then `EDITOR`, then `vi`.
 

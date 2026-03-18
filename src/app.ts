@@ -1,13 +1,26 @@
 import { mkdirSync } from 'node:fs'
+import process from 'node:process'
 import { styleText } from 'node:util'
 import { KBDatabase } from './db.ts'
 import { KBSearch } from './search.ts'
-import { editEntryInEditor, promptNewEntry } from './prompt.ts'
+import { collectProjectMetadata, formatCodeReferenceAnswer, readCodeReference } from './capture.ts'
+import { deriveQuestion, detectTagsInText, editEntryInEditor, promptNewEntry, readClipboardText } from './prompt.ts'
 import type { StoragePaths } from './paths.ts'
 import { maybeRunDailyBackup } from './backup.ts'
 
 type Command = 'add' | 'list' | 'get' | 'edit' | 'search' | 'remove'
-type ParsedCommand = { command: Command; arg: string | undefined; tag: string | undefined }
+type AddOptions = {
+  question: string | undefined
+  tags: string[]
+  answer: string | undefined
+  stdin: boolean
+  fromClipboard: boolean
+  format: string | undefined
+  file: string | undefined
+  lineStart: number | undefined
+  lineEnd: number | undefined
+}
+type ParsedCommand = { command: Command; arg: string | undefined; tag: string | undefined; add: AddOptions | undefined }
 
 export type AppDeps = {
   paths: StoragePaths
@@ -15,6 +28,9 @@ export type AppDeps = {
   out?: Pick<typeof console, 'log' | 'error'>
   promptNewEntry?: typeof promptNewEntry
   editEntryInEditor?: typeof editEntryInEditor
+  readClipboard?: typeof readClipboardText
+  readStdin?: () => Promise<string>
+  cwd?: string
 }
 
 export class CliExit extends Error {
@@ -43,6 +59,10 @@ export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1):
   const write = exitCode === 0 ? out.log : out.error
   write(paint.label('Usage'))
   write(`  ${paint.cmd('kb')}                         add a new entry`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--answer="..."')}      add from inline text`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--stdin [--tag=tag]')}  add from standard input`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--from-clipboard')}    add from clipboard`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--file=path --line-start=n --line-end=n --format=code-reference')}`)
   write(`  ${paint.cmd('kb list')} ${paint.arg('[--tag=tag]')}       list entries`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#id')}               show one entry`)
   write(`  ${paint.cmd('kb edit')} ${paint.arg('#id')}              edit one entry`)
@@ -51,10 +71,117 @@ export function usage(out: Pick<typeof console, 'log' | 'error'>, exitCode = 1):
   write('')
   write(paint.label('Examples'))
   write(`  ${paint.cmd('kb')}`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--answer="Use unicode61 tokenizer" --tag=sqlite')}`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--stdin --tag=sqlite')}`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--from-clipboard --tag=chrome')}`)
+  write(`  ${paint.cmd('kb add')} ${paint.arg('--file=src/app.ts --line-start=1 --line-end=8 --format=code-reference')}`)
   write(`  ${paint.cmd('kb list')} ${paint.arg('--tag=sqlite')}`)
   write(`  ${paint.cmd('kb get')} ${paint.arg('#12')}`)
   write(`  ${paint.cmd('kb search')} ${paint.arg('"fts tokenizer"')}`)
   throw new CliExit(exitCode)
+}
+
+function parseAddArgs(argv: string[], out: Pick<typeof console, 'log' | 'error'>): AddOptions {
+  const parsed: AddOptions = {
+    question: undefined,
+    tags: [],
+    answer: undefined,
+    stdin: false,
+    fromClipboard: false,
+    format: undefined,
+    file: undefined,
+    lineStart: undefined,
+    lineEnd: undefined,
+  }
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const part = argv[index]
+    if (!part) usage(out)
+
+    if (part === '--stdin') {
+      parsed.stdin = true
+      continue
+    }
+
+    if (part === '--from-clipboard') {
+      parsed.fromClipboard = true
+      continue
+    }
+
+    if (part === '--question' || part === '--tag' || part === '--answer' || part === '--format' || part === '--file' || part === '--line-start' || part === '--line-end') {
+      const value = argv[index + 1]
+      if (!value) usage(out)
+      if (part === '--question') parsed.question = value
+      if (part === '--tag') parsed.tags.push(value)
+      if (part === '--answer') parsed.answer = value
+      if (part === '--format') parsed.format = value
+      if (part === '--file') parsed.file = value
+      if (part === '--line-start') parsed.lineStart = Number(value)
+      if (part === '--line-end') parsed.lineEnd = Number(value)
+      index += 1
+      continue
+    }
+
+    if (part.startsWith('--question=')) {
+      parsed.question = part.slice('--question='.length)
+      continue
+    }
+
+    if (part.startsWith('--tag=')) {
+      parsed.tags.push(part.slice('--tag='.length))
+      continue
+    }
+
+    if (part.startsWith('--answer=')) {
+      parsed.answer = part.slice('--answer='.length)
+      continue
+    }
+
+    if (part.startsWith('--format=')) {
+      parsed.format = part.slice('--format='.length)
+      continue
+    }
+
+    if (part.startsWith('--file=')) {
+      parsed.file = part.slice('--file='.length)
+      continue
+    }
+
+    if (part.startsWith('--line-start=')) {
+      parsed.lineStart = Number(part.slice('--line-start='.length))
+      continue
+    }
+
+    if (part.startsWith('--line-end=')) {
+      parsed.lineEnd = Number(part.slice('--line-end='.length))
+      continue
+    }
+
+    usage(out)
+  }
+
+  const sources = Number(Boolean(parsed.answer)) + Number(parsed.stdin) + Number(parsed.fromClipboard)
+  if (parsed.format && parsed.format !== 'code-reference') throw new Error(`Unsupported add format: ${parsed.format}`)
+  if (parsed.format === 'code-reference') {
+    if (!parsed.file) throw new Error('code-reference format requires --file')
+    if (parsed.lineStart === undefined) throw new Error('code-reference format requires --line-start')
+    if (parsed.lineEnd === undefined) throw new Error('code-reference format requires --line-end')
+    if (sources > 0) throw new Error('code-reference format reads from --file and line range, not --answer, --stdin, or --from-clipboard')
+    if (parsed.question) throw new Error('code-reference format derives the question from the selected leading comment')
+    if (parsed.tags.length > 0) throw new Error('code-reference format auto-tags with the current project name only')
+  }
+  if (sources > 1) throw new Error('Use only one answer source: --answer, --stdin, or --from-clipboard')
+  return parsed
+}
+
+function hasAddFlags(add: AddOptions | undefined): boolean {
+  return Boolean(add && (add.question || add.answer || add.stdin || add.fromClipboard || add.tags.length > 0 || add.format || add.file || add.lineStart !== undefined || add.lineEnd !== undefined))
+}
+
+async function readStdinText(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 export function parseId(raw: string | undefined, out: Pick<typeof console, 'log' | 'error'>): number {
@@ -66,10 +193,11 @@ export function parseId(raw: string | undefined, out: Pick<typeof console, 'log'
 }
 
 export function parseCommand(argv: string[], out: Pick<typeof console, 'log' | 'error'>): ParsedCommand {
-  if (argv.length === 0) return { command: 'add', arg: undefined, tag: undefined }
+  if (argv.length === 0) return { command: 'add', arg: undefined, tag: undefined, add: undefined }
   const [first, ...rest] = argv
 
   if (first === 'help' || first === '--help' || first === '-h') usage(out, 0)
+  if (first === 'add') return { command: 'add', arg: undefined, tag: undefined, add: parseAddArgs(rest, out) }
 
   if (first === 'list') {
     let tag: string | undefined
@@ -87,13 +215,13 @@ export function parseCommand(argv: string[], out: Pick<typeof console, 'log' | '
       }
       usage(out)
     }
-    return { command: 'list', arg: undefined, tag }
+    return { command: 'list', arg: undefined, tag, add: undefined }
   }
 
-  if (first === 'get') return { command: 'get', arg: rest[0], tag: undefined }
-  if (first === 'edit') return { command: 'edit', arg: rest[0], tag: undefined }
-  if (first === 'remove') return { command: 'remove', arg: rest[0], tag: undefined }
-  if (first === 'search') return { command: 'search', arg: rest.join(' ').trim(), tag: undefined }
+  if (first === 'get') return { command: 'get', arg: rest[0], tag: undefined, add: undefined }
+  if (first === 'edit') return { command: 'edit', arg: rest[0], tag: undefined, add: undefined }
+  if (first === 'remove') return { command: 'remove', arg: rest[0], tag: undefined, add: undefined }
+  if (first === 'search') return { command: 'search', arg: rest.join(' ').trim(), tag: undefined, add: undefined }
   usage(out)
 }
 
@@ -133,6 +261,9 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
   const out = deps.out ?? console
   const promptForNewEntry = deps.promptNewEntry ?? promptNewEntry
   const editInEditor = deps.editEntryInEditor ?? editEntryInEditor
+  const readClipboard = deps.readClipboard ?? readClipboardText
+  const readStdin = deps.readStdin ?? readStdinText
+  const cwd = deps.cwd ?? process.cwd()
   let parsed: ParsedCommand
   try {
     parsed = parseCommand(argv, out)
@@ -152,7 +283,52 @@ export async function runCli(argv: string[], deps: AppDeps): Promise<number> {
     await search.ensureSynced(entries)
 
     if (parsed.command === 'add') {
-      const created = db.createEntry(await promptForNewEntry(db.listTags()))
+      const existingTags = db.listTags()
+      let entry
+
+      if (!hasAddFlags(parsed.add)) {
+        entry = await promptForNewEntry(existingTags)
+      } else if (parsed.add?.format === 'code-reference') {
+        const reference = readCodeReference({
+          cwd,
+          file: parsed.add.file!,
+          lineStart: parsed.add.lineStart!,
+          lineEnd: parsed.add.lineEnd!,
+        })
+        const metadata = collectProjectMetadata({
+          cwd,
+          file: parsed.add.file!,
+          lineStart: parsed.add.lineStart!,
+          lineEnd: parsed.add.lineEnd!,
+          absoluteFile: reference.absoluteFile,
+        })
+        entry = {
+          question: parsed.add.question?.trim() || reference.question,
+          answer: formatCodeReferenceAnswer({
+            snippet: reference.snippet,
+            language: reference.language,
+            metadata,
+            lineStart: parsed.add.lineStart!,
+            lineEnd: parsed.add.lineEnd!,
+          }),
+          tags: metadata.projectName ? [metadata.projectName] : [],
+        }
+      } else {
+        let answer = parsed.add?.answer
+        if (!answer && parsed.add?.stdin) answer = await readStdin()
+        if (!answer && parsed.add?.fromClipboard) answer = readClipboard()
+        if (!answer?.trim()) throw new Error('Answer required when using kb add flags')
+
+        const question = parsed.add?.question?.trim() || deriveQuestion(answer)
+        const tags = detectTagsInText(`${question}\n\n${answer}`, existingTags)
+        entry = {
+          question,
+          answer: answer.trim(),
+          tags: [...new Set([...(parsed.add?.tags ?? []), ...tags])],
+        }
+      }
+
+      const created = db.createEntry(entry)
       await search.upsert(created)
       out.log(paint.ok(`Saved #${created.id}`))
       return 0

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { buildEditorInvocation, formatEditableEntry, parseEditableEntry, splitEditorCommand } from './prompt.ts'
+import {
+  buildEditorInvocation,
+  deriveQuestion,
+  detectTagsInText,
+  formatEditableEntry,
+  parseEditableEntry,
+  splitEditorCommand,
+  stripRichText,
+} from './prompt.ts'
 
 describe('editable entry helpers', () => {
   it('splits editor commands with args', () => {
@@ -35,5 +43,21 @@ describe('editable entry helpers', () => {
 
   it('rejects invalid edit format', () => {
     expect(() => parseEditableEntry('nope')).toThrow('Invalid edit format')
+  })
+
+  it('strips markdown and html when deriving questions', () => {
+    expect(deriveQuestion('# SQLite FTS\n\nUse `unicode61` tokenizer.')).toBe('SQLite FTS')
+    expect(deriveQuestion('<h1>Chrome note</h1><p>Use contextMenus API.</p>')).toBe('Chrome note')
+  })
+
+  it('strips formatting but keeps readable text', () => {
+    expect(stripRichText('**Bold** [docs](https://example.com) <em>html</em>')).toBe('Bold docs html')
+  })
+
+  it('detects existing tags from cleaned text', () => {
+    expect(detectTagsInText('Use Full Text Search in <b>SQLite</b>.', ['sqlite', 'full-text-search', 'webstorm'])).toEqual([
+      'full-text-search',
+      'sqlite',
+    ])
   })
 })
