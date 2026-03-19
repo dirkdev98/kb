@@ -1,5 +1,8 @@
 # kb
 
+> [!WARNING]
+> This tool is vibe-coded. Use at your own risk.
+
 Small CLI for saving, editing, and searching personal knowledge-base entries.
 It stores entries in SQLite, keeps search fast with a local index, and stays entirely on your machine.
 
@@ -82,6 +85,38 @@ kb edit #12
 kb link #12 #18
 kb search "fts tokenizer"
 ```
+
+## AGENTS.md / CLAUDE.md
+
+Paste this into your `AGENTS.md` or `CLAUDE.md`:
+
+````md
+## Knowledge Base Tool
+
+When the user asks you to save something to the knowledge base:
+
+1. Optionally list existing tags with `kb tags`.
+2. Add the entry with explicit flags:
+   - `--question` for the question/title
+   - `--tag` for one or more tags
+   - `--answer` for the saved content
+
+Example:
+
+```bash
+kb add \
+  --question "How does SQLite FTS tokenization work?" \
+  --tag sqlite \
+  --tag fts \
+  --answer "Use the unicode61 tokenizer for standard full-text search behavior."
+```
+
+Rules:
+- Prefer explicit `kb add --question ... --tag ... --answer ...` over interactive entry.
+- Repeat `--tag` for multiple tags.
+- Use `kb tags` first when you want to reuse an existing tag set.
+- Never invent new behaviors when writing the question or answer.
+````
 
 ## Entry Flow
 
